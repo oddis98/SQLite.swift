@@ -109,7 +109,6 @@ public final class Connection {
                                   &_handle,
                                   flags | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI,
                                   nil))
-        queue.setSpecific(key: Connection.queueKey, value: queueContext)
     }
 
     /// Initializes a new connection to a database.
@@ -688,11 +687,14 @@ public final class Connection {
     // MARK: - Error Handling
 
     func sync<T>(_ block: () throws -> T) rethrows -> T {
-        if DispatchQueue.getSpecific(key: Connection.queueKey) == queueContext {
-            return try block()
-        } else {
-            return try queue.sync(execute: block)
-        }
+        // Serialize with a recursive lock instead of a DispatchQueue. On iOS 26+, DispatchQueue.sync
+        // lowers to dispatch_async_and_wait, which no longer satisfies the getSpecific() reentrancy
+        // check — so nested calls (run -> Statement.step) re-enter queue.sync and hit libdispatch's
+        // reentrancy trap (EXC_BREAKPOINT). A recursive lock serializes across threads and allows
+        // same-thread reentrancy. Fixes #929.
+        lock.lock()
+        defer { lock.unlock() }
+        return try block()
     }
 
     @discardableResult func check(_ resultCode: Int32, statement: Statement? = nil) throws -> Int32 {
@@ -703,11 +705,7 @@ public final class Connection {
         throw error
     }
 
-    fileprivate var queue = DispatchQueue(label: "SQLite.Database", attributes: [])
-
-    fileprivate static let queueKey = DispatchSpecificKey<Int>()
-
-    fileprivate lazy var queueContext: Int = unsafeBitCast(self, to: Int.self)
+    private let lock = NSRecursiveLock()
 
 }
 
