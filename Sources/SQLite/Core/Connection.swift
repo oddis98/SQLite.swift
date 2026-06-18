@@ -691,7 +691,7 @@ public final class Connection {
         // lowers to dispatch_async_and_wait, which no longer satisfies the getSpecific() reentrancy
         // check — so nested calls (run -> Statement.step) re-enter queue.sync and hit libdispatch's
         // reentrancy trap (EXC_BREAKPOINT). A recursive lock serializes across threads and allows
-        // same-thread reentrancy. Fixes #929.
+        // same-thread reentrancy. Fixes stephencelis/SQLite.swift#929.
         lock.lock()
         defer { lock.unlock() }
         return try block()
